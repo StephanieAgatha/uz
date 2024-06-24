@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -87,22 +88,38 @@ func main() {
 
 		newAddress := crypto.PubkeyToAddress(newPrivateKey.PublicKey)
 
-		// create tx
-		tx := types.NewTransaction(nonce, newAddress, value, gasLimit, gasPrice, nil)
+		for {
+			// create tx
+			tx := types.NewTransaction(nonce+uint64(i), newAddress, value, gasLimit, gasPrice, nil)
 
-		// sign in
-		signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), privateKey)
-		if err != nil {
-			log.Fatalf("Failed to sign the transaction: %v", err)
+			// sign in
+			signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), privateKey)
+			if err != nil {
+				log.Fatalf("Failed to sign the transaction: %v", err)
+			}
+
+			// send tx
+			err = client.SendTransaction(context.Background(), signedTx)
+			if err != nil {
+				if strings.Contains(err.Error(), "Replacement transaction underpriced") {
+					fmt.Println("Got an error :(, Retry transaction...")
+					time.Sleep(2 * time.Second)
+					continue
+				}
+				if strings.Contains(err.Error(), "Nonce too low") {
+					fmt.Println("Nonce too low, retrying with new nonce...")
+					nonce, err = client.PendingNonceAt(context.Background(), fromAddress)
+					if err != nil {
+						log.Fatalf("Failed to get the nonce : %v", err)
+					}
+					continue
+				}
+				log.Fatalf("Failed to send the transaction: %v", err)
+			}
+
+			fmt.Printf("Transaction sent to %s: %s\n", newAddress.Hex(), signedTx.Hash().Hex())
+			nonce++
+			break
 		}
-
-		// send tx
-		err = client.SendTransaction(context.Background(), signedTx)
-		if err != nil {
-			log.Fatalf("Failed to send the transaction: %v", err)
-		}
-
-		fmt.Printf("Transaction sent to %s: %s\n", newAddress.Hex(), signedTx.Hash().Hex())
-		nonce++
 	}
 }
