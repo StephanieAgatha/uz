@@ -114,6 +114,15 @@ func main() {
 					}
 					continue
 				}
+				if strings.Contains(err.Error(), "Upfront cost exceeds account balance") {
+					fmt.Println("your wallet has low Balance")
+					continue
+				}
+				if strings.Contains(err.Error(), "502 Bad Gateway") {
+					fmt.Println("Got an error 502 Bad Gateway. retrying in 3 seconds...")
+					time.Sleep(3 * time.Second)
+					continue
+				}
 				log.Fatalf("Failed to send the transaction: %v", err)
 			}
 
