@@ -5,9 +5,9 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"io/ioutil"
 	"log"
+	"math"
 	"math/big"
 	"os"
 	"strconv"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 const (
@@ -46,19 +47,27 @@ func main() {
 
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
+	//get balance
+	balance, err := client.BalanceAt(context.Background(), fromAddress, nil)
+	if err != nil {
+		log.Fatalf("Failed to get balance: %v", err)
+	}
+
+	balanceInUNIT0 := new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(math.Pow10(18)))
+	fmt.Printf("Balance wallet %s : %f UNIT0\n", fromAddress.Hex(), balanceInUNIT0)
+
 	// Get the nonce
 	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
 	if err != nil {
-		log.Fatalf("Failed to get the nonce: %v", err)
+		log.Fatalf("Failed to get the nonce : %v", err)
 	}
-
 	value := big.NewInt(100000000000000)
-	gasLimit := uint64(21000) // gas limit
+	gasLimit := uint64(21000) //gas limit
+
 	gasPrice, err := client.SuggestGasPrice(context.Background())
 	if err != nil {
 		log.Fatalf("Failed to suggest gas price: %v", err)
 	}
-
 	chainID := big.NewInt(88817)
 
 	reader := bufio.NewReader(os.Stdin)
