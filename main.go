@@ -62,7 +62,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get the nonce : %v", err)
 	}
-	value := big.NewInt(100000000000000)
+
+	value := big.NewInt(100000000000)
 	gasLimit := uint64(21000) //gas limit
 
 	gasPrice, err := client.SuggestGasPrice(context.Background())
@@ -101,6 +102,7 @@ func main() {
 			// send tx
 			err = client.SendTransaction(context.Background(), signedTx)
 			if err != nil {
+				//catch some errors in here
 				if strings.Contains(err.Error(), "Replacement transaction underpriced") {
 					fmt.Println("Got an error :(, Retry transaction...")
 					time.Sleep(2 * time.Second)
@@ -123,10 +125,16 @@ func main() {
 					time.Sleep(3 * time.Second)
 					continue
 				}
+				if strings.Contains(err.Error(), "Known transaction") {
+					fmt.Println("Got an error, retrying in 3 seconds...")
+					time.Sleep(3 * time.Second)
+					continue
+				}
+
 				log.Fatalf("Failed to send the transaction: %v", err)
 			}
 
-			fmt.Printf("Transaction sent to %s: %s\n", newAddress.Hex(), signedTx.Hash().Hex())
+			fmt.Printf("Transaction sent to %s with signature : %s\n", newAddress.Hex(), signedTx.Hash().Hex())
 			nonce++
 			break
 		}
