@@ -41,53 +41,7 @@ func main() {
 			continue // skip
 		}
 
-<<<<<<< HEAD
 		privateKey, err := crypto.HexToECDSA(privateKeyString)
-=======
-	publicKey := privateKey.Public()
-	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok {
-		log.Fatalf("Failed to cast public key to ECDSA: %v", err)
-	}
-
-	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
-
-	//get balance
-	balance, err := client.BalanceAt(context.Background(), fromAddress, nil)
-	if err != nil {
-		log.Fatalf("Failed to get balance: %v", err)
-	}
-
-	balanceInUNIT0 := new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(math.Pow10(18)))
-	fmt.Printf("Balance wallet %s : %f UNIT0\n", fromAddress.Hex(), balanceInUNIT0)
-
-	// Get the nonce
-	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
-	if err != nil {
-		log.Fatalf("Failed to get the nonce : %v", err)
-	}
-
-	value := big.NewInt(100000000000)
-	gasLimit := uint64(21000) //gas limit
-
-	gasPrice, err := client.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("Failed to suggest gas price: %v", err)
-	}
-	chainID := big.NewInt(88817)
-
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("How many wallets do you want to generate: ")
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
-	numWallets, err := strconv.Atoi(input)
-	if err != nil {
-		log.Fatalf("Invalid number of wallets: %v", err)
-	}
-
-	for i := 0; i < numWallets; i++ {
-		newPrivateKey, err := crypto.GenerateKey()
->>>>>>> 19f6dcebbfc04a2b7175f83f590bf0994462fa09
 		if err != nil {
 			log.Fatalf("Failed to load private key: %v", err)
 		}
@@ -139,7 +93,6 @@ func main() {
 				log.Fatalf("Failed to generate new private key: %v", err)
 			}
 
-<<<<<<< HEAD
 			newAddress := crypto.PubkeyToAddress(newPrivateKey.PublicKey)
 
 			for {
@@ -150,16 +103,6 @@ func main() {
 				signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), privateKey)
 				if err != nil {
 					log.Fatalf("Failed to sign the transaction: %v", err)
-=======
-			// send tx
-			err = client.SendTransaction(context.Background(), signedTx)
-			if err != nil {
-				//catch some errors in here
-				if strings.Contains(err.Error(), "Replacement transaction underpriced") {
-					fmt.Println("Got an error :(, Retry transaction...")
-					time.Sleep(2 * time.Second)
-					continue
->>>>>>> 19f6dcebbfc04a2b7175f83f590bf0994462fa09
 				}
 
 				// send tx
@@ -193,7 +136,6 @@ func main() {
 						time.Sleep(3 * time.Second)
 						continue
 					}
-<<<<<<< HEAD
 
 					log.Fatalf("Failed to send the transaction: %v", err)
 				}
@@ -202,31 +144,6 @@ func main() {
 				nonce++
 				break
 			}
-=======
-					continue
-				}
-				if strings.Contains(err.Error(), "Upfront cost exceeds account balance") {
-					fmt.Println("your wallet has low Balance")
-					continue
-				}
-				if strings.Contains(err.Error(), "502 Bad Gateway") {
-					fmt.Println("Got an error 502 Bad Gateway. retrying in 3 seconds...")
-					time.Sleep(3 * time.Second)
-					continue
-				}
-				if strings.Contains(err.Error(), "Known transaction") {
-					fmt.Println("Got an error, retrying in 3 seconds...")
-					time.Sleep(3 * time.Second)
-					continue
-				}
-
-				log.Fatalf("Failed to send the transaction: %v", err)
-			}
-
-			fmt.Printf("Transaction sent to %s with signature : %s\n", newAddress.Hex(), signedTx.Hash().Hex())
-			nonce++
-			break
->>>>>>> 19f6dcebbfc04a2b7175f83f590bf0994462fa09
 		}
 		fmt.Println("========================================")
 	}
