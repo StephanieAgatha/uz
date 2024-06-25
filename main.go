@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"math/big"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -32,11 +33,11 @@ func main() {
 
 	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
-		log.Fatalf("Failed to connect to the Ethereum client: %v", err)
+		log.Fatalf("Failed to connect to rpc url : %v", err)
 	}
 
 	for _, privateKeyString := range privateKeyStrings {
-		privateKeyString = strings.TrimSpace(privateKeyString)
+		privateKeyString = strings.TrimSpace(strings.ReplaceAll(privateKeyString, "\r", ""))
 		if privateKeyString == "" {
 			continue // skip
 		}
@@ -49,12 +50,12 @@ func main() {
 		publicKey := privateKey.Public()
 		publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 		if !ok {
-			log.Fatalf("Failed to cast public key to ECDSA: %v", err)
+			log.Fatalf("Failed to cast pubkey")
 		}
 
 		fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-		//get balance
+		// Get balance
 		balance, err := client.BalanceAt(context.Background(), fromAddress, nil)
 		if err != nil {
 			log.Fatalf("Failed to get balance: %v", err)
@@ -66,11 +67,9 @@ func main() {
 		// Get the nonce
 		nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
 		if err != nil {
-			log.Fatalf("Failed to get the nonce : %v", err)
+			log.Fatalf("Failed to get the nonce: %v", err)
 		}
-
-		value := big.NewInt(100000000000)
-		gasLimit := uint64(21000) //gas limit
+		gasLimit := uint64(21000) // gas limit
 
 		gasPrice, err := client.SuggestGasPrice(context.Background())
 		if err != nil {
@@ -87,6 +86,10 @@ func main() {
 			log.Fatalf("Invalid number of wallets: %v", err)
 		}
 
+		rand.Seed(time.Now().UnixNano())
+		minValue := big.NewInt(10000000000000)
+		maxValue := big.NewInt(9000000000000)
+
 		for i := 0; i < numWallets; i++ {
 			newPrivateKey, err := crypto.GenerateKey()
 			if err != nil {
@@ -96,6 +99,7 @@ func main() {
 			newAddress := crypto.PubkeyToAddress(newPrivateKey.PublicKey)
 
 			for {
+				value := new(big.Int).Add(minValue, big.NewInt(rand.Int63n(maxValue.Int64())))
 				// create tx
 				tx := types.NewTransaction(nonce+uint64(i), newAddress, value, gasLimit, gasPrice, nil)
 
@@ -108,36 +112,33 @@ func main() {
 				// send tx
 				err = client.SendTransaction(context.Background(), signedTx)
 				if err != nil {
-					//catch some errors in here
-					if strings.Contains(err.Error(), "Replacement transaction underpriced") {
+					// handle specific errors
+					switch {
+					case strings.Contains(err.Error(), "Replacement transaction underpriced"):
 						fmt.Println("Got an error :(, Retry transaction...")
 						time.Sleep(2 * time.Second)
 						continue
-					}
-					if strings.Contains(err.Error(), "Nonce too low") {
+					case strings.Contains(err.Error(), "Nonce too low"):
 						fmt.Println("Nonce too low, retrying with new nonce...")
 						nonce, err = client.PendingNonceAt(context.Background(), fromAddress)
 						if err != nil {
-							log.Fatalf("Failed to get the nonce : %v", err)
+							log.Fatalf("Failed to get the nonce: %v", err)
 						}
 						continue
-					}
-					if strings.Contains(err.Error(), "Upfront cost exceeds account balance") {
-						fmt.Println("your wallet has low Balance")
+					case strings.Contains(err.Error(), "Upfront cost exceeds account balance"):
+						fmt.Println("Your wallet has low Balance")
 						continue
-					}
-					if strings.Contains(err.Error(), "502 Bad Gateway") {
-						fmt.Println("Got an error 502 Bad Gateway. retrying in 3 seconds...")
+					case strings.Contains(err.Error(), "502 Bad Gateway"):
+						fmt.Println("Got an error 502 Bad Gateway. Retrying in 3 seconds...")
 						time.Sleep(3 * time.Second)
 						continue
-					}
-					if strings.Contains(err.Error(), "Known transaction") {
+					case strings.Contains(err.Error(), "Known transaction"):
 						fmt.Println("Got an error, retrying in 3 seconds...")
 						time.Sleep(3 * time.Second)
 						continue
+					default:
+						log.Fatalf("Failed to send the transaction: %v", err)
 					}
-
-					log.Fatalf("Failed to send the transaction: %v", err)
 				}
 
 				fmt.Printf("Transaction sent to %s , tx link : https://explorer-testnet.unit0.dev/tx/%s\n", newAddress.Hex(), signedTx.Hash().Hex())
