@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/ecdsa"
-	"crypto/rand"
 	"fmt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -44,20 +43,6 @@ func initLogger() *zap.SugaredLogger {
 	}
 
 	return logger.Sugar()
-}
-
-func generateRandomAmount() *big.Int {
-	// Generate a random number between 10000 and 40000
-	min := big.NewInt(10000)
-	max := new(big.Int).SetInt64(40000)
-	diff := new(big.Int).Sub(max, min)
-	n, _ := rand.Int(rand.Reader, diff)
-	n.Add(n, min)
-
-	// Convert to 0.00001 to 0.00004 UNIT0
-	amount := new(big.Int).Mul(n, big.NewInt(1000000000000)) // Multiply by 10^12
-
-	return amount
 }
 
 func processWallet(privateKeyString string, client *ethclient.Client, logger *zap.SugaredLogger, numWallets int, wg *sync.WaitGroup, remainingWallets *int) {
@@ -101,11 +86,17 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 		return
 	}
 
+	// Value: 0.0000000209 UNIT0
+	value := new(big.Int).Mul(big.NewInt(20900000), big.NewInt(1)) // 0.0000000209 * 10^18
+
 	// Gas settings
 	gasLimit := uint64(21000)
 
-	// Gas price: 0.000000000001233269 UNIT0 (0.001233269 Gwei)
-	gasPrice := new(big.Int).Mul(big.NewInt(1233269), big.NewInt(1000)) // 0.001233269 * 10^9
+	// MaxFeePerGas: 0.001233269 Gwei
+	maxFeePerGas := new(big.Int).Mul(big.NewInt(1233269), big.NewInt(1000)) // 0.001233269 * 10^9
+
+	// MaxPriorityFeePerGas: 0.001233269 Gwei (same as MaxFeePerGas in this case)
+	maxPriorityFeePerGas := new(big.Int).Set(maxFeePerGas)
 
 	for *remainingWallets > 0 {
 		newPrivateKey, err := crypto.GenerateKey()
@@ -116,14 +107,20 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 
 		newAddress := crypto.PubkeyToAddress(newPrivateKey.PublicKey)
 
-		// Generate random amount
-		value := generateRandomAmount()
-
-		// create legacy tx (type 0)
-		tx := types.NewTransaction(nonce, newAddress, value, gasLimit, gasPrice, nil)
+		// create EIP-1559 tx
+		tx := types.NewTx(&types.DynamicFeeTx{
+			ChainID:   chainID,
+			Nonce:     nonce,
+			GasTipCap: maxPriorityFeePerGas,
+			GasFeeCap: maxFeePerGas,
+			Gas:       gasLimit,
+			To:        &newAddress,
+			Value:     value,
+			Data:      nil,
+		})
 
 		// sign tx
-		signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), privateKey)
+		signedTx, err := types.SignTx(tx, types.LatestSignerForChainID(chainID), privateKey)
 		if err != nil {
 			logger.Errorf("Failed to sign the transaction: %v", err)
 			continue
@@ -165,14 +162,9 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 				continue
 			}
 		}
-
-		// Convert value to float for logging
-		valueFloat := new(big.Float).Quo(new(big.Float).SetInt(value), big.NewFloat(math.Pow10(18)))
-		valueString := valueFloat.Text('f', 7) // 7 decimal places should be enough for our range
-
-		logger.Infof("Transaction sent: hash=%s, address=%s, amount=%s UNIT0, nonce=%d", signedTx.Hash().Hex(), newAddress.Hex(), valueString, nonce)
-		logger.Info("Sleeping 8 seconds ....")
-		time.Sleep(8 * time.Second)
+		logger.Infof("Transaction sent: hash=%s, address=%s, amount=0.0000000209 UNIT0, nonce=%d", signedTx.Hash().Hex(), newAddress.Hex(), nonce)
+		logger.Info("Sleeping 1 minutes ....")
+		time.Sleep(1 * time.Minute)
 
 		nonce++
 		*remainingWallets--
