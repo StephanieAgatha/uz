@@ -141,6 +141,8 @@ func processWallet(privateKeyString string, client *ethclient.Client) {
 				}
 			}
 			log.Info().Str("hash", signedTx.Hash().Hex()).Str("address", newAddress.Hex()).Msg("Transaction sent !")
+			log.Info().Msg("Sleeping 8 seconds ....")
+			time.Sleep(8 * time.Second)
 
 			if headerValue != "" {
 				GetTxProgress(headerValue)
