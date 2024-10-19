@@ -163,8 +163,8 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 			}
 		}
 		logger.Infof("Transaction sent: hash=%s, address=%s, amount=0.0000000209 UNIT0, nonce=%d", signedTx.Hash().Hex(), newAddress.Hex(), nonce)
-		logger.Info("Sleeping 8 seconds ....")
-		time.Sleep(8 * time.Second)
+		logger.Info("Sleeping 15 seconds ....")
+		time.Sleep(15 * time.Second)
 
 		nonce++
 		*remainingWallets--
