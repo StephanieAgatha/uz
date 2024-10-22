@@ -196,8 +196,8 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 
 		logger.Infof("Transaction sent: hash=%s, address=%s, amount=%.6f UNIT0, nonce=%d",
 			signedTx.Hash().Hex(), newAddress.Hex(), weiToUnit0(value), nonce)
-		logger.Info("Sleeping 8 seconds ....")
-		time.Sleep(8 * time.Second)
+		logger.Info("Sleeping 22 seconds ....")
+		time.Sleep(22 * time.Second)
 
 		// Update balance and nonce
 		balance.Sub(balance, totalCost)
