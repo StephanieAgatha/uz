@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"fmt"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"io/ioutil"
-	"math"
 	"math/big"
 	"os"
 	"strconv"
@@ -45,6 +45,24 @@ func initLogger() *zap.SugaredLogger {
 	return logger.Sugar()
 }
 
+func generateRandomAmount() *big.Int {
+	// Generate a random number between 100 and 110
+	min := big.NewInt(10)
+	max := new(big.Int).SetInt64(11)
+	diff := new(big.Int).Sub(max, min)
+	n, _ := rand.Int(rand.Reader, diff)
+	n.Add(n, min)
+
+	// Convert to 0.00001 to 0.00002 UNIT0
+	amount := new(big.Int).Mul(n, big.NewInt(1000000000000)) // Multiply by 10^12
+
+	return amount
+}
+
+func weiToUnit0(wei *big.Int) *big.Float {
+	return new(big.Float).Quo(new(big.Float).SetInt(wei), big.NewFloat(1e18))
+}
+
 func processWallet(privateKeyString string, client *ethclient.Client, logger *zap.SugaredLogger, numWallets int, wg *sync.WaitGroup, remainingWallets *int) {
 	defer wg.Done()
 
@@ -70,8 +88,8 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 		return
 	}
 
-	balanceInUNIT0 := new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(math.Pow10(18)))
-	logger.Infof("Balance of wallet %s: %f UNIT0", fromAddress.Hex(), balanceInUNIT0)
+	balanceInUNIT0 := weiToUnit0(balance)
+	logger.Infof("Balance of wallet %s: %.6f UNIT0", fromAddress.Hex(), balanceInUNIT0)
 
 	// Get the nonce
 	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
@@ -86,9 +104,6 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 		return
 	}
 
-	// Value: 0.0000000209 UNIT0
-	value := new(big.Int).Mul(big.NewInt(20900000), big.NewInt(1)) // 0.0000000209 * 10^18
-
 	// Gas settings
 	gasLimit := uint64(21000)
 
@@ -99,6 +114,22 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 	maxPriorityFeePerGas := new(big.Int).Set(maxFeePerGas)
 
 	for *remainingWallets > 0 {
+		// Generate random amount
+		value := generateRandomAmount()
+
+		// Calculate total cost
+		gasCost := new(big.Int).Mul(maxFeePerGas, big.NewInt(int64(gasLimit)))
+		totalCost := new(big.Int).Add(value, gasCost)
+
+		// Check if we have enough balance
+		if balance.Cmp(totalCost) < 0 {
+			logger.Errorf("Insufficient balance for transaction. Required: %.6f UNIT0, Available: %.6f UNIT0",
+				weiToUnit0(totalCost), weiToUnit0(balance))
+			logger.Infof("Transaction amount: %.6f UNIT0, Gas cost: %.6f UNIT0",
+				weiToUnit0(value), weiToUnit0(gasCost))
+			return
+		}
+
 		newPrivateKey, err := crypto.GenerateKey()
 		if err != nil {
 			logger.Errorf("Failed to generate new private key: %v", err)
@@ -162,10 +193,14 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 				continue
 			}
 		}
-		logger.Infof("Transaction sent: hash=%s, address=%s, amount=0.0000000209 UNIT0, nonce=%d", signedTx.Hash().Hex(), newAddress.Hex(), nonce)
-		logger.Info("Sleeping 1 minutes ....")
-		time.Sleep(1 * time.Minute)
 
+		logger.Infof("Transaction sent: hash=%s, address=%s, amount=%.6f UNIT0, nonce=%d",
+			signedTx.Hash().Hex(), newAddress.Hex(), weiToUnit0(value), nonce)
+		logger.Info("Sleeping 8 seconds ....")
+		time.Sleep(8 * time.Second)
+
+		// Update balance and nonce
+		balance.Sub(balance, totalCost)
 		nonce++
 		*remainingWallets--
 		if *remainingWallets <= 0 {
@@ -173,7 +208,6 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 		}
 	}
 }
-
 func main() {
 	logger := initLogger()
 	defer logger.Sync()
