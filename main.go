@@ -227,7 +227,7 @@ func main() {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("How many wallets do you want to generate per private key: ")
+	fmt.Print("How many wallets do you want to generate: ")
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(input)
 	numWallets, err := strconv.Atoi(input)
