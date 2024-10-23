@@ -13,7 +13,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
@@ -46,7 +45,7 @@ func initLogger() *zap.SugaredLogger {
 }
 
 func generateRandomAmount() *big.Int {
-	// Generate a random number between 100 and 110
+	// Generate a random number between 10 and 11
 	min := big.NewInt(10)
 	max := new(big.Int).SetInt64(11)
 	diff := new(big.Int).Sub(max, min)
@@ -54,7 +53,7 @@ func generateRandomAmount() *big.Int {
 	n.Add(n, min)
 
 	// Convert to 0.00001 to 0.00002 UNIT0
-	amount := new(big.Int).Mul(n, big.NewInt(1000000000000)) // Multiply by 10^12
+	amount := new(big.Int).Mul(n, big.NewInt(1000000000000))
 
 	return amount
 }
@@ -63,71 +62,68 @@ func weiToUnit0(wei *big.Int) *big.Float {
 	return new(big.Float).Quo(new(big.Float).SetInt(wei), big.NewFloat(1e18))
 }
 
-func processWallet(privateKeyString string, client *ethclient.Client, logger *zap.SugaredLogger, numWallets int, wg *sync.WaitGroup, remainingWallets *int) {
-	defer wg.Done()
+func formatPrivateKey(privateKeyString string) string {
+	privateKeyString = strings.TrimSpace(privateKeyString)
+
+	if strings.HasPrefix(privateKeyString, "0x") {
+		privateKeyString = privateKeyString[2:]
+	}
+
+	return privateKeyString
+}
+
+func processWallet(privateKeyString string, client *ethclient.Client, logger *zap.SugaredLogger, numWallets int) error {
+	privateKeyString = formatPrivateKey(privateKeyString)
 
 	privateKey, err := crypto.HexToECDSA(privateKeyString)
 	if err != nil {
-		logger.Errorf("Failed to load private key: %v", err)
-		return
+		return fmt.Errorf("failed to load private key: %v", err)
 	}
 
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		logger.Errorf("Failed to cast public key: %v", err)
-		return
+		return fmt.Errorf("failed to cast public key")
 	}
 
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	// Get balance
 	balance, err := client.BalanceAt(context.Background(), fromAddress, nil)
 	if err != nil {
-		logger.Errorf("Failed to get balance: %v", err)
-		return
+		return fmt.Errorf("failed to get balance: %v", err)
 	}
 
 	balanceInUNIT0 := weiToUnit0(balance)
 	logger.Infof("Balance of wallet %s: %.6f UNIT0", fromAddress.Hex(), balanceInUNIT0)
 
-	// Get the nonce
+	//get the nonce
 	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
 	if err != nil {
-		logger.Errorf("Failed to get the nonce: %v", err)
-		return
+		return fmt.Errorf("failed to get the nonce: %v", err)
 	}
 
 	chainID, err := client.NetworkID(context.Background())
 	if err != nil {
-		logger.Errorf("Failed to get chainID: %v", err)
-		return
+		return fmt.Errorf("failed to get chainID: %v", err)
 	}
 
-	// Gas settings
 	gasLimit := uint64(21000)
-
-	// MaxFeePerGas: 0.001233269 Gwei
-	maxFeePerGas := new(big.Int).Mul(big.NewInt(1233269), big.NewInt(1000)) // 0.001233269 * 10^9
-
-	// MaxPriorityFeePerGas: 0.001233269 Gwei (same as MaxFeePerGas in this case)
+	maxFeePerGas := new(big.Int).Mul(big.NewInt(1233269), big.NewInt(1000))
 	maxPriorityFeePerGas := new(big.Int).Set(maxFeePerGas)
 
-	for *remainingWallets > 0 {
-		// Generate random amount
+	remainingWallets := numWallets
+	for remainingWallets > 0 {
 		value := generateRandomAmount()
 
-		// Calculate total cost
 		gasCost := new(big.Int).Mul(maxFeePerGas, big.NewInt(int64(gasLimit)))
 		totalCost := new(big.Int).Add(value, gasCost)
 
-		// Check if we have enough balance
 		if balance.Cmp(totalCost) < 0 {
 			logger.Errorf("Insufficient balance for transaction. Required: %.6f UNIT0, Available: %.6f UNIT0",
 				weiToUnit0(totalCost), weiToUnit0(balance))
 			logger.Infof("Transaction amount: %.6f UNIT0, Gas cost: %.6f UNIT0",
 				weiToUnit0(value), weiToUnit0(gasCost))
-			return
+			return fmt.Errorf("insufficient balance")
 		}
 
 		newPrivateKey, err := crypto.GenerateKey()
@@ -138,7 +134,6 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 
 		newAddress := crypto.PubkeyToAddress(newPrivateKey.PublicKey)
 
-		// create EIP-1559 tx
 		tx := types.NewTx(&types.DynamicFeeTx{
 			ChainID:   chainID,
 			Nonce:     nonce,
@@ -150,42 +145,39 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 			Data:      nil,
 		})
 
-		// sign tx
 		signedTx, err := types.SignTx(tx, types.LatestSignerForChainID(chainID), privateKey)
 		if err != nil {
 			logger.Errorf("Failed to sign the transaction: %v", err)
 			continue
 		}
 
-		// send tx
 		err = client.SendTransaction(context.Background(), signedTx)
 		if err != nil {
-			// handle specific errors
 			switch {
 			case strings.Contains(err.Error(), "Replacement transaction underpriced"):
-				logger.Errorf("Got an error: Replacement transaction underpriced. Retrying in 2 seconds...")
+				logger.Error("Got an error: Replacement transaction underpriced. Retrying in 2 seconds...")
 				time.Sleep(2 * time.Second)
 				continue
 			case strings.Contains(err.Error(), "Nonce too low"):
-				logger.Errorf("Nonce too low, retrying with new nonce...")
+				logger.Error("Nonce too low, retrying with new nonce...")
 				nonce, err = client.PendingNonceAt(context.Background(), fromAddress)
 				if err != nil {
-					logger.Errorf("Failed to get nonce: %v", err)
+					logger.Error("Failed to get nonce")
 				}
 				continue
 			case strings.Contains(err.Error(), "Upfront cost exceeds account balance"):
-				logger.Errorf("Your wallet has low balance: %v", err)
-				return
+				logger.Error("Your wallet has low balance")
+				return fmt.Errorf("low balance")
 			case strings.Contains(err.Error(), "502 Bad Gateway"):
-				logger.Errorf("Got an error 502 Bad Gateway. Retrying in 3 seconds...")
+				logger.Error("Got an error 502 Bad Gateway. Retrying in 3 seconds...")
 				time.Sleep(3 * time.Second)
 				continue
 			case strings.Contains(err.Error(), "503 Service Temporarily Unavailable"):
-				logger.Errorf("Got an error 503 Service Temporarily Unavailable. Retrying in 5 seconds...")
+				logger.Error("Got an error 503 Service Temporarily Unavailable. Retrying in 5 seconds...")
 				time.Sleep(5 * time.Second)
 				continue
 			case strings.Contains(err.Error(), "Known transaction"):
-				logger.Errorf("Got an error: Known transaction. Retrying in 3 seconds...")
+				logger.Error("Got an error: Known transaction. Retrying in 3 seconds...")
 				time.Sleep(3 * time.Second)
 				continue
 			default:
@@ -199,20 +191,18 @@ func processWallet(privateKeyString string, client *ethclient.Client, logger *za
 		logger.Info("Sleeping 22 seconds ....")
 		time.Sleep(22 * time.Second)
 
-		// Update balance and nonce
 		balance.Sub(balance, totalCost)
 		nonce++
-		*remainingWallets--
-		if *remainingWallets <= 0 {
-			break
-		}
+		remainingWallets--
 	}
+
+	return nil
 }
+
 func main() {
 	logger := initLogger()
 	defer logger.Sync()
 
-	//set start time
 	startTime := time.Now()
 
 	data, err := ioutil.ReadFile("pk.txt")
@@ -222,6 +212,14 @@ func main() {
 	}
 	privateKeyStrings := strings.Split(string(data), "\n")
 
+	var validPrivateKeys []string
+	for _, pk := range privateKeyStrings {
+		pk = strings.TrimSpace(pk)
+		if pk != "" {
+			validPrivateKeys = append(validPrivateKeys, pk)
+		}
+	}
+
 	client, err := ethclient.Dial(rpcURL)
 	if err != nil {
 		logger.Errorf("Failed to connect to rpc url: %v", err)
@@ -229,7 +227,7 @@ func main() {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("How many wallets do you want to generate: ")
+	fmt.Print("How many wallets do you want to generate per private key: ")
 	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(input)
 	numWallets, err := strconv.Atoi(input)
@@ -238,19 +236,24 @@ func main() {
 		return
 	}
 
-	var wg sync.WaitGroup
-	remainingWallets := numWallets
+	//sequentially
+	for i, privateKeyString := range validPrivateKeys {
+		logger.Infof("Processing private key %d of %d", i+1, len(validPrivateKeys))
 
-	for _, privateKeyString := range privateKeyStrings {
-		privateKeyString = strings.TrimSpace(strings.ReplaceAll(privateKeyString, "\r", ""))
-		if privateKeyString == "" {
-			continue // skip
+		err := processWallet(privateKeyString, client, logger, numWallets)
+		if err != nil {
+			logger.Errorf("Failed to process wallet with private key %d: %v", i+1, err)
+			//continue
+			continue
 		}
 
-		wg.Add(1)
-		go processWallet(privateKeyString, client, logger, numWallets, &wg, &remainingWallets)
+		logger.Infof("Completed processing private key %d of %d", i+1, len(validPrivateKeys))
+
+		if i < len(validPrivateKeys)-1 {
+			logger.Info("Waiting 30 seconds before processing next private key...")
+			time.Sleep(30 * time.Second)
+		}
 	}
-	wg.Wait()
 
 	endTime := time.Now()
 	duration := endTime.Sub(startTime).Seconds()
